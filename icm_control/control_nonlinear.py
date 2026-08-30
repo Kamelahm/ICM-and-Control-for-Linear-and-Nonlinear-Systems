@@ -15,41 +15,6 @@ CORRESPONDENCE WITH THE MANUSCRIPT
   kappa                   design parameter in the (1,1) block, not read off
   Pbar >= I               scale normalization (w.l.o.g. by homogeneity)
 
-CORRECTIONS RELATIVE TO THE EARLIER IMPLEMENTATION
---------------------------------------------------
-(1) Theta entries carry Delta**2, not abs(Delta).  The Young-type bound
-        f (u v^T + v u^T)  >=  -( tau Delta^2 u u^T + tau^-1 v v^T )
-    is valid iff the product of the two coefficients is at least Delta^2.
-    With `tau*abs(Delta)` and `1/tau` the product is abs(Delta), which exceeds
-    Delta^2 only while abs(Delta) <= 1 -- silently unsound above that and
-    needlessly conservative below it.
-
-(2) `contraction_factor` bisects on the fixed-kappa feasibility LMI instead of
-    minimizing kappa directly.  Minimizing drives the (1,1) block kappa*Pbar to
-    singularity at the optimum and the solver stalls: CLARABEL returned 0.9903
-    and SCS 0.9336 for a problem verifiably feasible at 0.90.  delta*, r* and
-    c* all scale with (1 - kappa), so a stalled kappa collapses them.
-
-(3) `verify_contraction` samples admissible (A, B) and checks the certificate
-    directly.
-
-SCOPE NOTE (Theorem 4 removed)
-------------------------------
-The ISS / ultimate-boundedness results have been dropped, and with them
-`iss_certificate`, `max_certified_wbar` and `augmented_disturbance_bound`.
-This module now certifies the DISTURBANCE-FREE closed loop only.
-
-That removal has one non-obvious consequence.  delta must be chosen in
-(0, delta*), and the two quantities it controls move in opposite directions:
-r* increases with delta (a larger tolerated perturbation admits a larger ball)
-while the decay rate c(delta) worsens toward 1.  Theorem 4's wbar_max balanced
-the two and therefore had an interior maximum, which is what
-`best_delta_certificate` used to optimize.  Maximizing c* alone instead pushes
-delta -> delta*, where c(delta) -> 1 and the certified convergence becomes
-arbitrarily slow.  `best_delta_certificate` therefore now maximizes c* subject
-to an explicit decay budget c(delta) <= c_max: "the largest certified region of
-attraction that still achieves the specified rate".  c_max is a reporting
-choice and must be stated alongside r* and c*.
 """
 
 from __future__ import annotations
