@@ -101,6 +101,17 @@ def one_trial(seed, alpha, N, lam_grid, rel_err=0.15, n_val=40,
                         for k, v in enclosure_by_source(res, Pv, Uv).items()})
             row["repr_gap"] = representability_gap(res, plant.A, plant.B, Pv, Uv)
             row["center_err"] = float(np.max(np.abs(res.CA - plant.A)))
+            # How much of the identified uncertainty actually sits in the
+            # dynamics.  The minimum-volume objective collapses mu_A, mu_B to
+            # zero whenever the disturbance template is generous enough to
+            # explain the data on its own; the identified model is then a point
+            # model plus an additive set, i.e. structurally a DCM with a better
+            # centre, and the matrix-zonotope machinery is inactive.  Worth
+            # reporting explicitly, because it decides whether the advantage
+            # over DCM is attributable to the sets or only to the prior.
+            row["muA_mass"] = float(np.sum(res.muA))
+            row["muB_mass"] = float(np.sum(res.muB))
+            row["muw_mass"] = float(np.sum(res.muw))
 
             model = to_uncertain_model(res)
             row["lambda_min"] = min_feasible_lambda(model, safe, Mx)
@@ -203,11 +214,56 @@ def main(args):
     ax.set_ylim(-3, 103)
     ax.legend(loc="lower left")
     save_fig(fig, "exp1_coverage_vs_extrapolation")
+
+    # -------- Fig: certified enclosure size vs extrapolation ----------------
+    # This is the direct picture of Lemma 5: the DCM set is a constant additive
+    # residual set, so its width is the same at 3x the identification radius as
+    # at 1x, whereas the ICM enclosure (18) carries state- and input-
+    # multiplicative parts that grow with (x,u).  The effect is only visible
+    # when the additive term does not dominate, i.e. at the tight template, so
+    # both template scales are drawn side by side rather than only the one used
+    # for the coverage figure.
+    encl_cols = [c for c in df.columns if c.startswith("encl_x")]
+    encl_factors = [float(c.split("x")[1]) for c in encl_cols]
+    fig, axes = plt.subplots(1, len(gammas), figsize=(COL_W * 2.06, COL_H),
+                             sharex=True)
+    axes = np.atleast_1d(axes)
+    for ax, gam in zip(axes, gammas):
+        sub_g = df[(np.abs(df.alpha - args.alpha_cov) < 1e-9)
+                   & (np.abs(df.gamma - gam) < 1e-9) & df.id_feasible]
+        for name in ORDER:
+            sub = sub_g[sub_g.method == name]
+            if sub.empty:
+                continue
+            ax.errorbar(encl_factors, [sub[c].mean() for c in encl_cols],
+                        yerr=[sub[c].sem() for c in encl_cols],
+                        capsize=2, label=label(name), **style(name))
+        ax.set_xlabel(r"$r\,/\,r_{\mathrm{id}}$")
+        ax.set_title(rf"$\gamma = {gam:g}$")
+    axes[0].set_ylabel(r"$\|\mathcal{E}\|$")
+    axes[0].legend(loc="upper left")
+    save_fig(fig, "exp1_enclosure_vs_extrapolation")
+
+    growth = (df[df.id_feasible].groupby(["gamma", "method"])
+              .apply(lambda s: s[encl_cols[-1]].mean() / max(s[encl_cols[0]].mean(), 1e-12),
+                     include_groups=False))
+    print("  [caption] enclosure growth ||E||(3x)/||E||(1x): "
+          + ";  ".join(f"gamma={g:g}, {label(m)}: {v:.2f}"
+                       for (g, m), v in growth.items()), flush=True)
     # The enclosure sizes belong in the caption: near-identical values are what
     # rule out "coverage was bought by inflating the sets".
     print(f"  [caption] Fig 2 at gamma = {args.gamma_cov:g}, alpha_1 = "
           f"{args.alpha_cov:g}; mean certified enclosure size at 1x:  "
           + ";  ".join(encl_note), flush=True)
+    act = (df[df.id_feasible].groupby(["gamma", "method"])[["muA_mass", "muB_mass"]]
+           .mean())
+    print("  [diagnostic] identified dynamics-set mass 1'mu_A (1'mu_B): "
+          + ";  ".join(f"gamma={g:g}, {label(m)}: {r.muA_mass:.3g} ({r.muB_mass:.3g})"
+                       for (g, m), r in act.iterrows()), flush=True)
+    print("  [diagnostic] a value near zero means the zonotopic dynamics "
+          "collapsed to a point estimate and the arm differs from DCM only "
+          "through its centre.", flush=True)
+
     tstar = cov_df.groupby("method")["repr_gap"].median().reindex(ORDER)
     print("  [caption] representability index t* (median): "
           + ";  ".join(f"{label(m)}: {tstar[m]:.3f}" for m in ORDER
@@ -262,6 +318,39 @@ def main(args):
                        "contraction factor certifiable by (19), averaged over "
                        "the $n_{\\rm common}$ trials on which all three arms "
                        "are feasible.")
+
+    # -------- Table: the same quantities resolved by N ----------------------
+    # Pooling over N hides the one dependence the reader most wants to see, and
+    # it is not monotone: more samples make the conformance constraints harder
+    # to satisfy simultaneously, so identification feasibility can fall as N
+    # grows even though Lemma 6 wants N large.  Reporting the pooled average
+    # alone invites the objection that the effect was averaged away.
+    by_n_rows = []
+    for N in sorted(df.N.unique()):
+        okN = ok[ok.N == N]
+        lpN = lpref[lpref.N == N]
+        commonN = common[common.N == N]
+        for name in ORDER:
+            s, l_, c_ = (okN[okN.method == name], lpN[lpN.method == name],
+                         commonN[commonN.method == name])
+            dfe = df[(df.N == N) & (df.method == name)]
+            by_n_rows.append({
+                "Method": label(name), "$N$": N,
+                "ID feas.": 100 * dfe["id_feasible"].mean(),
+                "Cov. $1\\times$": 100 * s["coverage_x1"].mean() if not s.empty else np.nan,
+                "Cov. $3\\times$": 100 * s["coverage_x3"].mean() if not s.empty else np.nan,
+                "Encl. size": s["encl_x1"].mean() if not s.empty else np.nan,
+                "$\\lambda^\\star$": c_["lambda_min"].mean() if not c_.empty else np.nan,
+                "LP feas.": 100 * l_["lp_feasible"].mean() if not l_.empty else np.nan,
+                "CL viol.": 100 * l_["cl_violation"].mean() if not l_.empty else np.nan,
+            })
+    save_table(pd.DataFrame(by_n_rows), "exp1_ablation_by_N",
+               caption="Ablation resolved by data length $N$ (rates in \\%). "
+                       "Feasibility is not monotone in $N$: additional samples "
+                       "add conformance equalities that must hold "
+                       "simultaneously, so a larger $N$ can reduce the "
+                       "feasible set even though the coverage bound of "
+                       "Lemma~6 improves with $N$.")
 
     src_cols = [c for c in df.columns if c.startswith("src_")]
     if src_cols:
