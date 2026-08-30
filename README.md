@@ -15,7 +15,188 @@ Outputs: `results/figures/*.pdf`, `results/tables/*.tex` and `*.csv`.
 
 ---
 
-## Package layout
+## 1. Reviewer comment → deliverable
+
+| Reviewer request | Script | Figures | Tables |
+|---|---|---|---|
+| Nonlinear coverage (Lemma 9), interval cost (Cor. 2), nonlinear ablation, ROA vs a point model | `exp3_nonlinear.py` | `exp3_nonlinear_coverage`, `exp3_roa_by_arm` | `exp3_nonlinear`, `exp3_interval_cost` |
+| Prior mis-specification (Remark 1) and the excitation claim (Lemma 4-2, Remark 2) | `exp6_prior.py` | `exp6_prior_bias`, `exp6_excitation` | `exp6_prior_bias`, `exp6_excitation` |
+| Three-way ablation DCM / ICM-noSI / ICM (R4.3, R5.3, R5.7) | `exp1_ablation.py` | `exp1_feasibility_vs_noise`, `exp1_contraction_margin`, `exp1_feasibility_vs_lambda`, `exp1_coverage_vs_extrapolation`, `exp1_tightness_vs_coverage` | `exp1_ablation`, `exp1_error_sources` |
+| Misspecified-basis experiment on the pendulum (R5.6) | `exp2_roa.py` | `exp2_misspecified_trajectories`, `exp2_misspecified_phase` | `exp2_roa` |
+| Stronger baselines: set-membership [13]–[14], tube-MPC [24] (R4 minor 2, R5.7) | `exp4_baselines.py` | `exp4_baselines_tradeoff`, `exp4_baselines_violations` | `exp4_baselines` |
+| Computation time and complexity vs least squares (R1.1, R5.7) | `exp5_computation.py` | `exp5_computation_time`, `exp5_problem_size` | `exp5_complexity`, `exp5_generator_cost` |
+| Generator / initial-set sensitivity (R5.2, R1.7) | `exp7_sensitivity.py` | `exp7_template_heatmap`, `exp7_sensitivity_eps`, `exp7_initial_set` | `exp7_template_sensitivity`, `exp7_generator_count`, `exp7_initial_set` |
+
+The three ablation arms come from one solver with two flags, so objective,
+disturbance template, operating region, solver and data are identical across
+arms and every difference is attributable to the single feature switched:
+
+```python
+solve_conformant_model(..., zonotopic=False, side_info=False)  # DCM,      Eq. (12)
+solve_conformant_model(..., zonotopic=True,  side_info=False)  # ICM-noSI, Eq. (10) w/o (10e)-(10f)
+solve_conformant_model(..., zonotopic=True,  side_info=True)   # ICM,      Eq. (10)
+```
+
+---
+
+## 2. Things to fix in the theory before resubmitting
+
+These came out of implementing the results, and a careful reviewer will find
+them too.
+
+**(a) Eq. (32b)–(32c) is not satisfiable as printed.** The quadratic bounding
+step `f(uvᵀ + vuᵀ) ⪰ −(τ|Δ| vvᵀ + τ⁻¹ uuᵀ)` *subtracts* from the diagonal, so
+the robust LMI must carry `P − Θ_A − Θ_B̃` in the (2,2) block and `+V₃`, `+V₂`
+in the Schur blocks. As printed, `−V₃` and `−V₂` sit on the diagonal, and no
+positive-definite matrix has negative-definite diagonal blocks.
+
+**(b) Eq. (32d) points the wrong way.** `X − P⁻¹ ⪰ 0` makes `X` an *upper*
+bound on `P⁻¹`, but `X` occupies the (1,1) block where enlarging it *relaxes*
+the LMI, so a feasible point does not imply the Lyapunov decrease. The code
+uses the congruence `S = P⁻¹`, `Y = KS`, recovering `K = YS⁻¹` and `D = S⁻¹`;
+this removes the inverse entirely and is an exact LMI in `(S, Y, λ, ε)`. The
+LMI is homogeneous of degree one in `(S, Y, λ, ε)` and `K` is invariant under
+that scaling, so `S ⪰ I` is imposed without loss of generality — this also
+fixes the conditioning, which the certificates of Theorem 3 are sensitive to.
+
+**(c) The contraction rate must be designed, not read off.** With the (1,1)
+block equal to `S`, the LMI only certifies non-strict decrease, so the
+recovered `κ` sits at `≈0.999` and `δ*`, `r*`, `c*` collapse to nothing.
+Putting `κ S` in the (1,1) block with `κ` a design parameter and sweeping it
+(`sweep_contraction_targets`) is what makes Theorem 3 produce non-trivial
+numbers.
+
+**(d) Assumption 2 is stronger than what the identification delivers.** It
+demands a *single* pair `(A¹, B¹)` absorbing the mismatch for all admissible
+`(x,u)`, whereas Definition 4 explicitly lets the realization vary with `k`.
+Worse, the minimum-volume objective drives individual `µ*_{w,i}` to zero, so
+`Ŵ` becomes lower dimensional and the representability condition fails at
+*any* scaling. `scripts/calibrate_assumptions.py` quantifies this: with no floor the required
+inflation `t*` is unbounded; a floor `µ_w ≥ 0.05` makes it finite at
+negligible cost in `s_X` and coverage. Two options: state Assumption 2
+pointwise in `k` to match Definition 4, or add the floor to (10) and keep the
+uniform version. The solver supports `mu_floor=` for the latter.
+
+**(e) The Fig. 2 argument is hard to defend.** Presenting a *larger* `s_X` as
+"necessary conservatism" invites the reply that any method can inflate its
+sets. The replacement metric throughout this package is held-out **coverage**:
+the fraction of true transitions the identified model actually explains,
+measured inside the identification region and at 2× and 3× extrapolation.
+That is what a safety guarantee rests on, and it separates the arms cleanly.
+
+---
+
+## 3. Findings worth putting in the text
+
+**The α₁ sweep only reproduces the reported behaviour when the disturbance
+template `G^w` is held fixed while the true noise scales.** That is the regime
+Lemma 3 is actually about: the cap `µ_w ≤ 1` in (10d) limits how much a purely
+additive explanation can absorb, so DCM becomes infeasible while ICM keeps
+explaining the data through the zonotopic dynamics. This gives the feasibility
+collapse a mechanism instead of leaving it unexplained. Representative numbers
+(third-order plant, template `0.01 I`):
+
+| α₁ | DCM | ICM-noSI | ICM |
+|---|---|---|---|
+| 1.0 | 100% | 100% | 100% |
+| 2.0 | 33% | 100% | 100% |
+| 3.0 | 0% | 100% | 100% |
+| 5.0 | 0% | 100% | 66% (N=30) |
+
+The ICM drop at α₁ = 5 is the "infeasibility as diagnostic signal" of Remark 2
+showing up empirically, and the non-monotonicity in `N` reproduces the
+observation already in the paper.
+
+**Biased priors produce infeasibility, not confident errors.** In
+With prior half-width 0.15, identification is 100% feasible while the
+prior contains the truth and drops to 0% once the bias exceeds the half-width.
+ICM does not silently return a wrong model — this is the concrete evidence for
+Remark 2 that the paper currently asserts without support.
+
+**The honest baseline comparison.** Set-membership with an *oracle* disturbance
+bound attains 100% coverage but with ~1.8× the enclosure size of ICM, and it
+becomes infeasible as soon as the assumed bound is optimistic (β = 0.5). Tube
+ZPC covers the training data but degrades to ~60% out of sample. Stating this
+plainly is stronger than claiming dominance: ICM's case is that it needs no
+disturbance bound, stays feasible where DCM does not, and is tighter than SMI.
+
+**Lemma 5 is visible in the data.** ICM's coverage at 2× extrapolation is
+*higher* than at 1× in several configurations, because the state-multiplicative
+part of the enclosure (18) widens with `‖x‖` exactly where extrapolation makes
+prediction less reliable. Worth pointing at explicitly.
+
+**The Theorem 3/4 constants are conservative.** Certified `w̄_max` lands around
+0.02–0.04 on the pendulum while simulation stays bounded at 10× that, and the
+predicted ultimate bound exceeds the observed one by one to two orders of
+magnitude. The binding term is `a = sup‖D A_cl‖`; the code tightens it using
+elementwise monotonicity of the spectral norm (`‖DΔA‖₂ ≤ ‖|D| ΔA‖₂`), which
+helps substantially but does not close the gap. Report it as
+sufficient-but-conservative with the observed values alongside — silence here
+is what draws fire.
+
+**Section 4 now has numbers, and they are lopsided.** On the pendulum the
+nonlinear ablation separates far more sharply than the linear one. Held-out
+coverage at the identification radius is 67% for ICM against 17-23% for DCM and
+ICM-noSI, and the certified ROA differs by nearly three orders of magnitude in
+area. The mechanism is visible in `rho` = `||Ahat + B Khat||`, the residual
+after nonlinearity cancellation: about 0.005 for ICM against 0.09 for the
+prior-free arms. Data collected near the upright equilibrium barely excites
+`sin x1 - x1` and `1 - cos x1`, so the nonlinear block of `A` is close to
+unidentifiable from data alone and `Khat` has nothing reliable to cancel. The
+prior supplies exactly those directions. Report `r*` and the `r_star_capped`
+flag alongside the area: ICM's `r*` saturates the `x_max = pi` reporting cap, so
+the ROA ratio understates the certificate and the cap should be stated.
+
+**Corollary 2 is free in the regime the paper operates in, and that is worth
+saying rather than hiding.** With the entrywise template of Section 5.1 every
+generator is a single-entry matrix, so the identified matrix zonotope already
+*is* an interval matrix and Lemma 1 loses nothing -- the inflation ratio is
+1.000 to machine precision. The relaxation only costs something when the
+generator directions are not axis-aligned *and* `mu_A > 0`; the rotated-template
+row of `exp3_interval_cost` gives 1.34-1.37 and is the only row where the
+comparison measures anything.
+
+**At the headline operating point the zonotopic dynamics are inactive.** The
+`[diagnostic]` line of `exp1` reports `1'mu_A`. At the generous template
+(`gamma = 8`, the upper block of Table 1) it is `~1e-8`: the minimum-volume
+objective explains everything additively and collapses `Ahat`, `Bhat` to
+singletons, so the identified model is a point model plus an additive set --
+structurally a DCM with a better centre. At `gamma = 1` it is `~0.5` and the
+sets are genuinely active. This is consistent with the paper's own sentence
+that the gain comes from shifting the centres, but it means the enclosure
+growth of Lemma 5 is only observable at the tight template: the growth ratio
+`||E||(3x)/||E||(1x)` is 2.0-2.4 for ICM and exactly 1.00 for DCM at
+`gamma = 1`, and 1.00 for everything at `gamma = 8`. Draw the Lemma 5 figure at
+`gamma = 1` or it shows nothing.
+
+**Infeasibility really is the diagnostic Remark 1 claims.** Sweeping the prior
+centre bias at fixed half-width 0.15: identification stays 100% feasible while
+the prior contains the truth, degrades in coverage (100% -> 49% -> 27%) as the
+bias grows past the half-width, and hits 0% feasibility at bias 0.4. The
+prior-free arm is flat across the whole sweep, which is the control that makes
+the attribution clean.
+
+**The identified sets never contain the true matrices.** `contains_true` is 0%
+across every configuration, including bias 0. This is the empirical form of the
+caveat the paper already states after the motivating example, and it is the
+reason coverage rather than containment has to be the headline metric. State it
+rather than leaving a reader to discover it.
+
+**The zonotopic slack does not reduce the data requirement; the prior does.**
+Below the excitation threshold `n + m = 6`, with an identical zonotopic
+template in all three arms, the prior-free arm has centre error 0.71 and 0%
+coverage at `N = 3`, while the dense and structure-aware priors sit at 0.002 to
+0.005 and 100%. This is the concrete evidence for Lemma 4-2 and Remark 2, which
+the paper currently argues only analytically.
+
+**Sensitivity is to the generator magnitude, not the directions.** At fixed
+`ε`, the choice among per-entry / per-row / random / residual-PCA templates
+changes coverage by a few percent; changing `ε` over a decade moves everything.
+`ε` is effectively the prior width and should be presented as such.
+
+---
+
+## 4. Package layout
 
 ```
 icm_control/
@@ -27,7 +208,10 @@ icm_control/
   control_nonlinear.py   Theorem 2 SDP, Theorem 3 ROA, Theorem 4 ISS, L_Z / ā
   evaluation.py          coverage, enclosure size, Assumption 2 test
   reporting.py           IEEE plot style, CSV + LaTeX table export
-experiments/             exp1 ... exp7
+experiments/             exp1 (linear ablation), exp2 (ROA figure),
+                         exp3 (nonlinear validation), exp4 (baselines),
+                         exp5 (computation), exp6 (prior + excitation),
+                         exp7 (generator sensitivity)
 results/figures, results/tables
 ```
 
