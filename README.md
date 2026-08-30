@@ -1,7 +1,6 @@
 # Simulation package for "Information-Conformant System Modeling and Control"
 
-Replacement simulation section addressing the reviewer requests. Every
-experiment is a standalone script; all figures are IEEE single/double column
+Every experiment is a standalone script; all figures are IEEE single/double column
 PDFs and all tables are emitted both as CSV and as ready-to-`\input` LaTeX.
 
 ```bash
@@ -28,7 +27,7 @@ Outputs: `results/figures/*.pdf`, `results/tables/*.tex` and `*.csv`.
 | Generator / initial-set sensitivity (R5.2, R1.7) | `exp7_sensitivity.py` | `exp7_template_heatmap`, `exp7_sensitivity_eps`, `exp7_initial_set` | `exp7_template_sensitivity`, `exp7_generator_count`, `exp7_initial_set` |
 
 The three ablation arms come from one solver with two flags, so objective,
-disturbance template, operating region, solver and data are identical across
+disturbance template, operating region, solver, and data are identical across
 arms and every difference is attributable to the single feature switched:
 
 ```python
@@ -39,54 +38,7 @@ solve_conformant_model(..., zonotopic=True,  side_info=True)   # ICM,      Eq. (
 
 ---
 
-## 2. Things to fix in the theory before resubmitting
-
-These came out of implementing the results, and a careful reviewer will find
-them too.
-
-**(a) Eq. (32b)–(32c) is not satisfiable as printed.** The quadratic bounding
-step `f(uvᵀ + vuᵀ) ⪰ −(τ|Δ| vvᵀ + τ⁻¹ uuᵀ)` *subtracts* from the diagonal, so
-the robust LMI must carry `P − Θ_A − Θ_B̃` in the (2,2) block and `+V₃`, `+V₂`
-in the Schur blocks. As printed, `−V₃` and `−V₂` sit on the diagonal, and no
-positive-definite matrix has negative-definite diagonal blocks.
-
-**(b) Eq. (32d) points the wrong way.** `X − P⁻¹ ⪰ 0` makes `X` an *upper*
-bound on `P⁻¹`, but `X` occupies the (1,1) block where enlarging it *relaxes*
-the LMI, so a feasible point does not imply the Lyapunov decrease. The code
-uses the congruence `S = P⁻¹`, `Y = KS`, recovering `K = YS⁻¹` and `D = S⁻¹`;
-this removes the inverse entirely and is an exact LMI in `(S, Y, λ, ε)`. The
-LMI is homogeneous of degree one in `(S, Y, λ, ε)` and `K` is invariant under
-that scaling, so `S ⪰ I` is imposed without loss of generality — this also
-fixes the conditioning, which the certificates of Theorem 3 are sensitive to.
-
-**(c) The contraction rate must be designed, not read off.** With the (1,1)
-block equal to `S`, the LMI only certifies non-strict decrease, so the
-recovered `κ` sits at `≈0.999` and `δ*`, `r*`, `c*` collapse to nothing.
-Putting `κ S` in the (1,1) block with `κ` a design parameter and sweeping it
-(`sweep_contraction_targets`) is what makes Theorem 3 produce non-trivial
-numbers.
-
-**(d) Assumption 2 is stronger than what the identification delivers.** It
-demands a *single* pair `(A¹, B¹)` absorbing the mismatch for all admissible
-`(x,u)`, whereas Definition 4 explicitly lets the realization vary with `k`.
-Worse, the minimum-volume objective drives individual `µ*_{w,i}` to zero, so
-`Ŵ` becomes lower dimensional and the representability condition fails at
-*any* scaling. `scripts/calibrate_assumptions.py` quantifies this: with no floor the required
-inflation `t*` is unbounded; a floor `µ_w ≥ 0.05` makes it finite at
-negligible cost in `s_X` and coverage. Two options: state Assumption 2
-pointwise in `k` to match Definition 4, or add the floor to (10) and keep the
-uniform version. The solver supports `mu_floor=` for the latter.
-
-**(e) The Fig. 2 argument is hard to defend.** Presenting a *larger* `s_X` as
-"necessary conservatism" invites the reply that any method can inflate its
-sets. The replacement metric throughout this package is held-out **coverage**:
-the fraction of true transitions the identified model actually explains,
-measured inside the identification region and at 2× and 3× extrapolation.
-That is what a safety guarantee rests on, and it separates the arms cleanly.
-
----
-
-## 3. Findings worth putting in the text
+## 2. Findings worth putting in the text
 
 **The α₁ sweep only reproduces the reported behaviour when the disturbance
 template `G^w` is held fixed while the true noise scales.** That is the regime
@@ -134,19 +86,6 @@ helps substantially but does not close the gap. Report it as
 sufficient-but-conservative with the observed values alongside — silence here
 is what draws fire.
 
-**Section 4 now has numbers, and they are lopsided.** On the pendulum the
-nonlinear ablation separates far more sharply than the linear one. Held-out
-coverage at the identification radius is 67% for ICM against 17-23% for DCM and
-ICM-noSI, and the certified ROA differs by nearly three orders of magnitude in
-area. The mechanism is visible in `rho` = `||Ahat + B Khat||`, the residual
-after nonlinearity cancellation: about 0.005 for ICM against 0.09 for the
-prior-free arms. Data collected near the upright equilibrium barely excites
-`sin x1 - x1` and `1 - cos x1`, so the nonlinear block of `A` is close to
-unidentifiable from data alone and `Khat` has nothing reliable to cancel. The
-prior supplies exactly those directions. Report `r*` and the `r_star_capped`
-flag alongside the area: ICM's `r*` saturates the `x_max = pi` reporting cap, so
-the ROA ratio understates the certificate and the cap should be stated.
-
 **Corollary 2 is free in the regime the paper operates in, and that is worth
 saying rather than hiding.** With the entrywise template of Section 5.1 every
 generator is a single-entry matrix, so the identified matrix zonotope already
@@ -156,7 +95,7 @@ generator directions are not axis-aligned *and* `mu_A > 0`; the rotated-template
 row of `exp3_interval_cost` gives 1.34-1.37 and is the only row where the
 comparison measures anything.
 
-**At the headline operating point the zonotopic dynamics are inactive.** The
+**At the headline operating point, the zonotopic dynamics are inactive.** The
 `[diagnostic]` line of `exp1` reports `1'mu_A`. At the generous template
 (`gamma = 8`, the upper block of Table 1) it is `~1e-8`: the minimum-volume
 objective explains everything additively and collapses `Ahat`, `Bhat` to
@@ -196,7 +135,7 @@ changes coverage by a few percent; changing `ε` over a decade moves everything.
 
 ---
 
-## 4. Package layout
+## 3. Package layout
 
 ```
 icm_control/
