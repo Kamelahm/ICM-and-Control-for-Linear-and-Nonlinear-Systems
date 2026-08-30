@@ -28,6 +28,7 @@ METHOD_STYLE = {
     "SMI":        dict(color="#9467bd", marker="v", ls=":"),
     "Tube-MPC":   dict(color="#8c564b", marker="D", ls="-."),
     "LS":         dict(color="#7f7f7f", marker="x", ls=":"),
+    "ICM-rot":    dict(color="#e377c2", marker="*", ls="--"),
 }
 
 LABELS = {
@@ -37,6 +38,7 @@ LABELS = {
     "SMI": "Set-membership [13], [14]",
     "Tube-MPC": "Tube-based ZPC [24]",
     "LS": "Least squares",
+    "ICM-rot": "ICM, rotated template",
 }
 
 

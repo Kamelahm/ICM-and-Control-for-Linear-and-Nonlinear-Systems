@@ -62,6 +62,64 @@ def enclosure_size(model, Phi, U):
     return float(np.mean(vals))
 
 
+def interval_next_state_set(model, phi, u):
+    """
+    One-step set under the axis-aligned interval relaxation of Lemma 1, i.e. the
+    uncertainty description (28)-(30) that the nonlinear SDP of Theorem 2
+    actually consumes:
+
+        I_A Z(x) + I_B u + What      with  I_A = [C^A - dG_A, C^A + dG_A].
+
+    Because the interval hull of a matrix zonotope acts entrywise, the image is
+    a box: centre  C^A phi + C^B u + c^w  and radius  dG_A |phi| + dG_B |u| +
+    sum_i |G^w_{:,i}| mu_i.  Returned as (centre, radius) rather than a Zonotope
+    because the exact-membership LP is unnecessary for a box.
+    """
+    phi = np.asarray(phi, float).reshape(-1)
+    u = np.asarray(u, float).reshape(-1)
+    dA = model.A_set.radius() if model.A_set is not None else 0.0
+    dB = model.B_set.radius() if model.B_set is not None else 0.0
+    r = np.sum(np.abs(model.W_set.G), axis=1)
+    if np.ndim(dA):
+        r = r + dA @ np.abs(phi)
+    if np.ndim(dB):
+        r = r + dB @ np.abs(u)
+    return model.predict(phi, u), r
+
+
+def coverage_interval(model, Phi, U, Xp, tol=1e-6):
+    """
+    Coverage of the interval-relaxed model, i.e. the left-hand side of (57).
+
+    Corollary 2 says this can only exceed `coverage` of the zonotopic sets, so
+    reporting the pair quantifies what Lemma 1 gives away: the gap in enclosure
+    size is the price paid for the relaxation, and the gap in coverage is the
+    (nonnegative) slack it buys.
+    """
+    if model is None or not getattr(model, "feasible", False):
+        return np.nan
+    ok = 0
+    for k in range(Phi.shape[1]):
+        c, r = interval_next_state_set(model, Phi[:, k], U[:, k])
+        ok += int(np.all(np.abs(np.asarray(Xp[:, k], float).reshape(-1) - c)
+                         <= r + tol))
+    return ok / Phi.shape[1]
+
+
+def enclosure_size_interval(model, Phi, U):
+    """
+    Mean L1 generator mass of the interval-relaxed enclosure, on the same scale
+    as `enclosure_size` (a box of radius r has generator matrix diag(r), so its
+    generator mass is sum(r)).  The ratio to `enclosure_size` is the inflation
+    factor incurred by Lemma 1.
+    """
+    if model is None or not getattr(model, "feasible", False):
+        return np.nan
+    vals = [float(np.sum(interval_next_state_set(model, Phi[:, k], U[:, k])[1]))
+            for k in range(Phi.shape[1])]
+    return float(np.mean(vals))
+
+
 def enclosure_by_source(model, Phi, U):
     """Mean per-source contribution (state / input / additive) -- Lemma 5(2)."""
     if model is None or not getattr(model, "feasible", False):
