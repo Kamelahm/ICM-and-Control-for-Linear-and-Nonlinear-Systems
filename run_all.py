@@ -26,7 +26,7 @@ JOBS = {
         "Three-way ablation: DCM / ICM-noSI / ICM  (R4.3, R5.3, R5.7)",
         [], ["--trials", "3", "--alphas", "1.0", "3.0", "--data-lengths", "10"]),
     2: ("exp2_roa.py",
-        "Misspecified basis on the pendulum  (R5.6)",
+        "Pendulum: certified region of attraction and input-feasible level (Fig. 2)",
         [], ["--trials", "2"]),
     3: ("exp3_nonlinear.py",
         "Nonlinear validation: coverage (Lemma 9), interval cost (Cor. 2), ROA",
@@ -45,6 +45,18 @@ JOBS = {
         "Generator and initial-set sensitivity  (R5.2, R1.7)",
         [], ["--trials", "3", "--eps-grid", "0.02", "0.1", "--gen-counts",
              "1", "3", "--x0-radii", "0.25", "0.5"]),
+    8: ("exp8_certified_linear.py",
+        "Certified control of the true linear plant (SPS, Theorem: finite-horizon safety)",
+        [], ["--Ns", "400", "--trials", "2", "--n-val", "20"]),
+    9: ("exp9_certified_pendulum.py",
+        "Certified stability of the true pendulum (SPS, nonlinear corollary)",
+        [], ["--Ns", "400", "--trials", "2"]),
+    10: ("exp10_weights.py",
+         "Sensitivity of the ICM split to the objective weights (Section 5.7)",
+         [], ["--Ns", "10", "--trials", "2"]),
+    11: ("exp11_conformal.py",
+         "Split-conformal least-squares baseline (Table 2)",
+         [], ["--Ns", "10", "--trials", "2"]),
 }
 
 
