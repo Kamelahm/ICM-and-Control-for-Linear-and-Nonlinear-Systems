@@ -20,11 +20,11 @@ Outputs: `results/figures/*.pdf`, `results/tables/*.tex` and `*.csv`.
 |---|---|---|---|
 | Nonlinear coverage (Lemma 9), interval cost (Cor. 2), nonlinear ablation, ROA vs a point model | `exp3_nonlinear.py` | `exp3_nonlinear_coverage`, `exp3_roa_by_arm` | `exp3_nonlinear`, `exp3_interval_cost` |
 | Prior mis-specification (Remark 1) and the excitation claim (Lemma 4-2, Remark 2) | `exp6_prior.py` | `exp6_prior_bias`, `exp6_excitation` | `exp6_prior_bias`, `exp6_excitation` |
-| Three-way ablation DCM / ICM-noSI / ICM (R4.3, R5.3, R5.7) | `exp1_ablation.py` | `exp1_feasibility_vs_noise`, `exp1_contraction_margin`, `exp1_feasibility_vs_lambda`, `exp1_coverage_vs_extrapolation`, `exp1_tightness_vs_coverage` | `exp1_ablation`, `exp1_error_sources` |
+| Three-way ablation DCM / ICM-noSI / ICM | `exp1_ablation.py` | `exp1_feasibility_vs_noise`, `exp1_contraction_margin`, `exp1_feasibility_vs_lambda`, `exp1_coverage_vs_extrapolation`, `exp1_tightness_vs_coverage` | `exp1_ablation`, `exp1_error_sources` |
 | Pendulum: certified region of attraction and input-feasible level (Fig. 2) | `exp2_roa.py` | `exp2_roa_phase` | `exp2_roa` |
-| Stronger baselines: set-membership [13]–[14], tube-MPC [24] (R4 minor 2, R5.7) | `exp4_baselines.py` | `exp4_baselines_tradeoff`, `exp4_baselines_violations` | `exp4_baselines` |
-| Computation time and complexity vs least squares (R1.1, R5.7) | `exp5_computation.py` | `exp5_computation_time`, `exp5_problem_size` | `exp5_complexity`, `exp5_generator_cost` |
-| Generator / initial-set sensitivity (R5.2, R1.7) | `exp7_sensitivity.py` | `exp7_template_heatmap`, `exp7_sensitivity_eps`, `exp7_initial_set` | `exp7_template_sensitivity`, `exp7_generator_count`, `exp7_initial_set` |
+| Stronger baselines: set-membership [13]–[14], tube-MPC [24]  | `exp4_baselines.py` | `exp4_baselines_tradeoff`, `exp4_baselines_violations` | `exp4_baselines` |
+| Computation time and complexity vs least squares | `exp5_computation.py` | `exp5_computation_time`, `exp5_problem_size` | `exp5_complexity`, `exp5_generator_cost` |
+| Generator / initial-set sensitivity | `exp7_sensitivity.py` | `exp7_template_heatmap`, `exp7_sensitivity_eps`, `exp7_initial_set` | `exp7_template_sensitivity`, `exp7_generator_count`, `exp7_initial_set` |
 | Certified control of the true linear plant: SPS parameter set, disturbance box, finite-horizon safety (Section 5.8) | `exp8_certified_linear.py` | | `exp8_certified` |
 | Certified stability of the true pendulum (Section 5.8) | `exp9_certified_pendulum.py` | | `exp9_certified` |
 | Objective-weight sensitivity of the ICM split (Section 5.7) | `exp10_weights.py` | | `exp10_weights` |
