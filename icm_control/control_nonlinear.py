@@ -170,15 +170,50 @@ def nonlinearity_cancellation_sdp(A0, dA, Ahat0, dAhat, B0, dB,
     Pv = np.array(P.value)
     Pv = 0.5 * (Pv + Pv.T)
     Kv = np.array(Y.value) @ np.linalg.inv(Pv)          # Kbar = Ybar Pbar^{-1}
-    des = NonlinearDesign(True, status, K=Kv, Khat=np.array(Khat.value),
+    Khv = np.array(Khat.value)
+    # rho is NOT read off the solver: with the SCS fallback an
+    # "optimal_inaccurate" point can report rho ~ 0 while the actual bound is
+    # ~0.1.  certified_rho evaluates sup ||Ahat + B Khat||_2 over the intervals
+    # for the returned Khat directly.
+    rho_c = certified_rho(Khv, Ahat0, dAhat, B0, dB)
+    des = NonlinearDesign(True, status, K=Kv, Khat=Khv,
                           S=Pv, D=np.linalg.inv(Pv),
-                          rho_sq=float(rho.value),
-                          rho=float(np.sqrt(max(rho.value, 0.0))),
+                          rho_sq=float(rho_c ** 2), rho=float(rho_c),
                           solve_time=dt)
+    des.meta["rho_sdp"] = float(np.sqrt(max(rho.value, 0.0)))
     des.meta["min_eig_lyap"] = float(np.linalg.eigvalsh(np.array(LMI_lyap.value))[0])
     des.meta["kappa_target"] = kappa_target
     des.meta["cond_S"] = float(np.linalg.cond(Pv))
     return des
+
+
+def certified_rho(Khat, Ahat0, dAhat, B0, dB, max_vertices=2 ** 16):
+    """
+    Upper bound on sup ||Ahat + B Khat||_2 over the interval family, for a
+    GIVEN Khat.  The spectral norm is convex in (Ahat, B), so the supremum over
+    the box is attained at a vertex; it is computed exactly when the number of
+    vertices is at most `max_vertices`, and otherwise bounded by
+    ||Ahat0 + B0 Khat|| + || dAhat ||_2 + || dB |Khat| ||_2  (valid because
+    the spectral norm is monotone on entrywise-nonnegative matrices).
+    """
+    Khat = np.asarray(Khat, float)
+    nom = Ahat0 + B0 @ Khat
+    tri = float(np.linalg.norm(nom, 2) + np.linalg.norm(dAhat, 2)
+                + np.linalg.norm(dB @ np.abs(Khat), 2))
+    ia = np.argwhere(dAhat > 0); ib = np.argwhere(dB > 0)
+    nv = len(ia) + len(ib)
+    if 2 ** nv > max_vertices:
+        return tri
+    import itertools
+    best = 0.0
+    for s in itertools.product((-1.0, 1.0), repeat=nv):
+        Ah = Ahat0.copy(); B = B0.copy()
+        for (i, j), si in zip(ia, s[:len(ia)]):
+            Ah[i, j] += si * dAhat[i, j]
+        for (i, j), si in zip(ib, s[len(ia):]):
+            B[i, j] += si * dB[i, j]
+        best = max(best, float(np.linalg.norm(Ah + B @ Khat, 2)))
+    return min(best, tri)
 
 
 # --------------------------------------------------------------------------- #
@@ -192,7 +227,26 @@ def _lyap_feasible(kap, design, A0, dA, B0, dB, solver="CLARABEL"):
     prob = cp.Problem(cp.Minimize(0),
                       [blk >> 0, lam >= 1e-7, eps2 >= 1e-7])
     status, _ = safe_solve(prob, solver=solver)
-    return solved_ok(status)
+    if not solved_ok(status) or lam.value is None or eps2.value is None:
+        return False
+    # A posteriori check.  When CLARABEL fails, the SCS fallback can report
+    # "optimal"/"optimal_inaccurate" for an infeasible kappa, and the bisection
+    # then accepted kappa values that verify_contraction rejects.  The check is
+    # done on the Schur complement of the diagonal multiplier blocks, which is
+    # equivalent to blk >= 0 for positive multipliers and, unlike blk itself,
+    # does not inherit the scale 1/radius^2 of the multipliers (multipliers of
+    # order 1e11 appear when the ICM radii collapse to ~1e-11).
+    lv = np.asarray(lam.value, float); ev = np.asarray(eps2.value, float)
+    if lv.min() <= 0 or ev.min() <= 0:
+        return False
+    E = np.eye(n)
+    Th = _theta(lv, dA, n, E) + _theta(ev, dB, n, E)
+    U3 = np.hstack([P] * n); U4 = np.hstack([Y.T] * n)
+    TL = kap * P - U3 @ np.diag(1.0 / lv) @ U3.T - U4 @ np.diag(1.0 / ev) @ U4.T
+    Mm = A0 @ P + B0 @ Y
+    R = np.block([[TL, Mm.T], [Mm, P - Th]])
+    R = 0.5 * (R + R.T)
+    return bool(np.linalg.eigvalsh(R)[0] >= -1e-9 * max(1.0, np.abs(P).max()))
 
 
 def contraction_factor(design: NonlinearDesign, A0, dA, B0, dB,
@@ -214,6 +268,22 @@ def contraction_factor(design: NonlinearDesign, A0, dA, B0, dB,
         else:
             lo = mid
     return float(hi)
+
+
+def certified_kappa(design, A0, dA, B0, dB, solver="CLARABEL"):
+    """
+    Verified contraction factor for the reported design.  The bisection value
+    is used, and the design target replaces it only when the target itself
+    passes the verified LMI check.  (Previously the target was substituted
+    whenever the bisection returned more than the target, which certified
+    kappa = 0.3 for a design whose actual worst-case contraction was 0.87.)
+    """
+    kappa = contraction_factor(design, A0, dA, B0, dB, solver=solver)
+    kt = design.meta.get("kappa_target")
+    if (kt is not None and np.isfinite(kappa) and kappa > kt
+            and _lyap_feasible(kt, design, A0, dA, B0, dB, solver)):
+        kappa = float(kt)
+    return kappa
 
 
 def verify_contraction(design: NonlinearDesign, kappa, A0, dA, B0, dB,
@@ -298,10 +368,7 @@ def roa_certificate(design: NonlinearDesign, Q: Callable, n: int,
     evals = np.linalg.eigvalsh(D)
     lam_lo, lam_hi = float(evals[0]), float(evals[-1])
     if kappa is None:
-        kappa = contraction_factor(design, A0, dA, B0, dB, solver=solver)
-        kt = design.meta.get("kappa_target")
-        if kt is not None and (not np.isfinite(kappa) or kappa > kt):
-            kappa = kt
+        kappa = certified_kappa(design, A0, dA, B0, dB, solver=solver)
     if not np.isfinite(kappa) or kappa >= 1.0:
         return {"kappa": kappa, "feasible": False}
 
@@ -350,10 +417,7 @@ def best_delta_certificate(design, Q, n, A0, dA, B0, dB, x_max=None, rng=None,
     rng = rng or np.random.default_rng(0)
     r_cap = float(x_max) if x_max is not None else float(np.pi)
     profile = _g_profile(Q, r_cap, n, rng)
-    kappa = contraction_factor(design, A0, dA, B0, dB, solver=solver)
-    kt = design.meta.get("kappa_target")
-    if kt is not None and (not np.isfinite(kappa) or kappa > kt):
-        kappa = kt
+    kappa = certified_kappa(design, A0, dA, B0, dB, solver=solver)
     best, best_c = None, -1.0
     for f in fracs:
         roa = roa_certificate(design, Q, n, A0, dA, B0, dB, x_max=x_max,

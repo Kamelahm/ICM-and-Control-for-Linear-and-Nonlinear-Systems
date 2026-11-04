@@ -77,7 +77,8 @@ def lambda_contractive_lp(model: UncertainModel,
                           safe_set: Polytope,
                           lam: float = 0.9,
                           Mx: Optional[float] = None,
-                          solver: str = "CLARABEL", norm_type: str = "inf") -> ControlResult:
+                          solver: str = "CLARABEL", norm_type: str = "inf",
+                          u_max: Optional[float] = None) -> ControlResult:
     """
     Theorem 1 / Eq. (19).  Renders the polyhedral safe set S_s = <H,h>_P
     robustly lambda-contractive for every realization of the identified sets.
@@ -110,6 +111,8 @@ def lambda_contractive_lp(model: UncertainModel,
     cons = [P @ h <= lam * h - H @ model.cw - Mx * aA - rho * Mx * aB - aW,
             P @ H == H @ (model.CA + model.CB @ K),
             K_bound <= rho]
+    if u_max is not None:                       # (31f): rho * M_x <= u_max
+        cons.append(rho * Mx <= u_max)
 
     prob = cp.Problem(cp.Minimize(rho), cons)
     t0 = time.perf_counter()
@@ -126,7 +129,8 @@ def lambda_contractive_lp(model: UncertainModel,
 
 # --------------------------------------------------------------------------- #
 def min_feasible_lambda(model: UncertainModel, safe_set: Polytope,
-                        Mx: Optional[float] = None, tol=5e-3, solver="CLARABEL", norm_type: str = "inf"):
+                        Mx: Optional[float] = None, tol=5e-3, solver="CLARABEL", norm_type: str = "inf",
+                        u_max: Optional[float] = None):
     """
     Smallest lambda for which (19) is feasible: a *continuous* measure of how
     much contraction the identified model can certify.  Lower is better; a
@@ -138,13 +142,13 @@ def min_feasible_lambda(model: UncertainModel, safe_set: Polytope,
     if Mx is None:
         Mx = safe_set.max_norm_bound()
     if not lambda_contractive_lp(model, safe_set, 1.0, Mx, solver,
-                                 norm_type=norm_type).feasible:
+                                 norm_type=norm_type, u_max=u_max).feasible:
         return np.nan
     lo, hi = 0.0, 1.0
     while hi - lo > tol:
         mid = 0.5 * (lo + hi)
         if lambda_contractive_lp(model, safe_set, mid, Mx, solver,
-                                 norm_type=norm_type).feasible:
+                                 norm_type=norm_type, u_max=u_max).feasible:
             hi = mid
         else:
             lo = mid

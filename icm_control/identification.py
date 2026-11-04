@@ -113,6 +113,7 @@ def solve_conformant_model(Phi: np.ndarray,
                            side_info: bool = True,
                            weights=(0.10, 0.10, 0.10, 1.0),
                            mu_floor: float = 0.0,
+                           reg: float = 0.0,
                            solver: str = "CLARABEL",
                            verbose: bool = False,
                            method_name: Optional[str] = None) -> IdentificationResult:
@@ -130,6 +131,17 @@ def solve_conformant_model(Phi: np.ndarray,
     zonotopic : if False the dynamics collapse to point estimates -> DCM
     side_info : if False the containment constraints (10e)-(10f) are dropped
     weights   : (nu_A, nu_B, nu_w, nu_s) in the objective J_M
+    reg       : epsilon_r of the scenario lemma.  Adds
+                epsilon_r * ||vartheta - vartheta_0||_2^2 with
+                vartheta = (C^A, C^B, c^w, mu_A, mu_B, mu_w, s_X) and
+                vartheta_0 = (C_side^A, C_side^B, 0, ..., 0), the prior centers,
+                fixed before the data.  This makes the minimizer unique, so the
+                scenario bound applies to the program actually solved.  The
+                anchor matters: (12) is degenerate in the centers, and anchoring
+                at the origin selects the minimum-norm centers, which are pulled
+                away from the plant (held-out coverage fell from 100% to 40% in
+                the Table 2 setting).  Used only with side information; the
+                baselines without side information ignore it.
     mu_floor  : lower bound on mu_w.  The minimum-volume objective otherwise
                 drives individual mu_w entries to zero, which makes the
                 identified What lower dimensional; the representability
@@ -222,6 +234,15 @@ def solve_conformant_model(Phi: np.ndarray,
         obj = obj + nuA * cp.sum(muA)
     if sB:
         obj = obj + nuB * cp.sum(muB)
+
+    if reg > 0 and side_info and A_side is not None and B_side is not None:
+        parts = [cp.sum_squares(CA - A_side.C), cp.sum_squares(CB - B_side.C),
+                 cp.sum_squares(cw), cp.sum_squares(muw), cp.square(sX)]
+        if sA:
+            parts.append(cp.sum_squares(muA))
+        if sB:
+            parts.append(cp.sum_squares(muB))
+        obj = obj + reg * sum(parts)
 
     prob = cp.Problem(cp.Minimize(obj), cons)
     t0 = time.perf_counter()

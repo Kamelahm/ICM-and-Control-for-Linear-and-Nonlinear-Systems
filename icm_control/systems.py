@@ -175,6 +175,43 @@ def collect_data(system,
     return Phi, U, Xp, Xs
 
 
+def collect_independent(system,
+                        N: int,
+                        rng: np.random.Generator,
+                        x_radius: float = 1.0,
+                        u_range: float = 0.5,
+                        w_gen: Optional[np.ndarray] = None,
+                        w_sampler: Optional[Callable] = None,
+                        basis: Optional[Callable] = None):
+    """
+    N independent one-step experiments (Assumptions 4 and 9): x_k uniform on
+    the box ||x||_inf <= x_radius, u_k uniform on [-u_range, u_range]^m, w_k
+    from the disturbance model, all independent; x_{k+1} = system.step(...).
+    Same return convention as `collect_data`.
+    """
+    n = system.n if hasattr(system, "n") else 2
+    m = system.B.shape[1] if hasattr(system, "B") else system.m_in
+    Xs = rng.uniform(-x_radius, x_radius, size=(n, N))
+    U = rng.uniform(-u_range, u_range, size=(m, N))
+    Xp = np.empty((n, N))
+    for k in range(N):
+        if w_sampler is not None:
+            w = w_sampler(rng)
+        elif w_gen is not None:
+            w = w_gen @ rng.uniform(-1, 1, size=w_gen.shape[1])
+        else:
+            w = np.zeros(n)
+        Xp[:, k] = system.step(Xs[:, k], U[:, k], w)
+    Phi = Xs if basis is None else np.array([basis(Xs[:, k]) for k in range(N)]).T
+    return Phi, U, Xp, Xs
+
+
+def box_region(n, radius=1.0):
+    """Operating region X = {||x||_inf <= radius}, fixed before the data."""
+    H = np.vstack([np.eye(n), -np.eye(n)])
+    return Polytope(H, radius * np.ones(2 * n))
+
+
 # --------------------------------------------------------------------------- #
 #  Physically motivated side information
 # --------------------------------------------------------------------------- #
