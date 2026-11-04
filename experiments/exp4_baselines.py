@@ -31,6 +31,8 @@ from icm_control.identification import solve_dcm, solve_icm
 from icm_control.reporting import (COL_H, COL_W, label, save_fig, save_table,
                                    style, use_paper_style)
 from icm_control.sets import Zonotope
+from icm_control.protocol import REG, U_MAX_LIN, X_RADIUS_LIN
+from icm_control.systems import collect_independent, box_region
 from icm_control.systems import (collect_data, linear_side_info,
                                  operating_region_from_data, safe_set_box,
                                  third_order_system)
@@ -49,9 +51,9 @@ def one_trial(seed, N, alpha=2.0, template=0.01, rel_err=0.15,
     W_true = Zonotope(np.zeros(n), Gw_true)
     w_true_bound = alpha * template * np.ones(n)
 
-    Phi, U, Xp, Xs = collect_data(plant, N, 0.5 * np.ones(n), rng,
-                                  u_range=0.5, w_gen=Gw_true)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, N, rng, x_radius=X_RADIUS_LIN,
+                                         u_range=0.5, w_gen=Gw_true)
+    X_region = box_region(n, X_RADIUS_LIN)
     safe = safe_set_box(n, 1.0)
     Mx = safe.max_norm_bound(p=np.inf)
     r_data = float(np.max(np.abs(Xs)))
@@ -68,10 +70,10 @@ def one_trial(seed, N, alpha=2.0, template=0.01, rel_err=0.15,
         models[f"SMI(beta={b:g})"] = set_membership(Phi, U, Xp, b * w_true_bound)
     models["DCM"] = solve_dcm(Phi=Phi, U=U, Xp=Xp, Gw=Gw_template,
                               X_region=X_region, GA_blocks=GA, GB_blocks=GB,
-                              A_side=A_side, B_side=B_side, mu_floor=mu_floor)
+                              A_side=A_side, B_side=B_side, mu_floor=mu_floor, reg=REG)
     models["ICM"] = solve_icm(Phi=Phi, U=U, Xp=Xp, Gw=Gw_template,
                               X_region=X_region, GA_blocks=GA, GB_blocks=GB,
-                              A_side=A_side, B_side=B_side, mu_floor=mu_floor)
+                              A_side=A_side, B_side=B_side, mu_floor=mu_floor, reg=REG)
 
     rows = []
     for name, mdl in models.items():
@@ -84,7 +86,7 @@ def one_trial(seed, N, alpha=2.0, template=0.01, rel_err=0.15,
                 row[f"coverage_x{f:g}"] = coverage(mdl, Pv, Uv, Xpv)
                 row[f"encl_x{f:g}"] = enclosure_size(mdl, Pv, Uv)
             row["coverage_train"] = coverage(mdl, Phi, U, Xp)
-            ctrl = lambda_contractive_lp(to_uncertain_model(mdl), safe, lam, Mx)
+            ctrl = lambda_contractive_lp(to_uncertain_model(mdl), safe, lam, Mx, u_max=U_MAX_LIN)
             row["lp_feasible"] = ctrl.feasible
             row["lp_time"] = ctrl.solve_time
             if ctrl.feasible:

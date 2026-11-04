@@ -33,6 +33,8 @@ from icm_control.reporting import (COL_H, COL_W, save_fig, save_table,
 from icm_control.sets import (MatrixZonotope, identity_blocks, random_blocks,
                               residual_pca_blocks, row_blocks,
                               structured_prior)
+from icm_control.protocol import REG, U_MAX_LIN, X_RADIUS_LIN
+from icm_control.systems import collect_independent, box_region
 from icm_control.systems import (collect_data, operating_region_from_data,
                                  safe_set_box, third_order_system)
 
@@ -67,12 +69,11 @@ def one_config(seed, eps, template, x0_radius, N=30, alpha=2.0,
     Gw_true = alpha * template_w * np.eye(n)
     Gw_template = template_w * np.eye(n)
 
-    Phi, U, Xp, Xs = collect_data(plant, N, x0_radius * np.ones(n), rng,
-                                  u_range=0.5, w_gen=Gw_true,
-                                  reset_radius=5.0 * x0_radius)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, N, rng, x_radius=2.0 * x0_radius,
+                                         u_range=0.5, w_gen=Gw_true)
+    X_region = box_region(n, 2.0 * x0_radius)
     safe = safe_set_box(n, 1.0)
-    Mx = np.sqrt(n)
+    Mx = safe.max_norm_bound(p=np.inf)          # = 1 for the unit box (Section 5.1)
     r_data = float(np.max(np.abs(Xs)))
     Pv, Uv, Xpv, _ = sample_validation(plant, n_val,
                                        np.random.default_rng(seed + 8),
@@ -85,7 +86,8 @@ def one_config(seed, eps, template, x0_radius, N=30, alpha=2.0,
     B_side = MatrixZonotope(plant.B, identity_blocks(n, m, rel_err + eps))
 
     res = solve_icm(Phi=Phi, U=U, Xp=Xp, Gw=Gw_template, X_region=X_region,
-                    GA_blocks=GA, GB_blocks=GB, A_side=A_side, B_side=B_side)
+                    GA_blocks=GA, GB_blocks=GB, A_side=A_side, B_side=B_side,
+                    reg=REG)
     row = {"seed": seed, "eps": eps, "template": template,
            "x0_radius": x0_radius, "s_A": len(GA), "N": N,
            "id_feasible": res.feasible, "sX": res.sX,
@@ -96,9 +98,9 @@ def one_config(seed, eps, template, x0_radius, N=30, alpha=2.0,
         row["encl"] = enclosure_size(res, Pv, Uv)
         row["mu_sum"] = float(np.sum(res.muA))
         model = to_uncertain_model(res)
-        ctrl = lambda_contractive_lp(model, safe, lam, Mx)
+        ctrl = lambda_contractive_lp(model, safe, lam, Mx, u_max=U_MAX_LIN)
         row["lp_feasible"] = ctrl.feasible
-        row["lambda_min"] = min_feasible_lambda(model, safe, Mx)
+        row["lambda_min"] = min_feasible_lambda(model, safe, Mx, u_max=U_MAX_LIN)
     return row
 
 

@@ -45,6 +45,8 @@ from icm_control.identification import (solve_dcm, solve_icm,
 from icm_control.reporting import (COL_H, COL_W, label, save_fig, save_table,
                                    style, use_paper_style, wilson_ci)
 from icm_control.sets import Zonotope
+from icm_control.protocol import REG, U_MAX_LIN, X_RADIUS_LIN
+from icm_control.systems import collect_independent, box_region
 from icm_control.systems import (collect_data, linear_side_info,
                                  operating_region_from_data, safe_set_box,
                                  third_order_system)
@@ -70,9 +72,9 @@ def one_trial(seed, alpha, N, lam_grid, rel_err=0.15, n_val=40,
     Gw_template = gamma * template * np.eye(n)
     W_true = Zonotope(np.zeros(n), Gw_true)
 
-    Phi, U, Xp, Xs = collect_data(plant, N, 0.5 * np.ones(n), rng,
-                                  u_range=0.5, w_gen=Gw_true)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, N, rng, x_radius=X_RADIUS_LIN,
+                                         u_range=0.5, w_gen=Gw_true)
+    X_region = box_region(n, X_RADIUS_LIN)
     safe = safe_set_box(n, 1.0)
     Mx = safe.max_norm_bound(p=np.inf)
     A_side, GA, B_side, GB = linear_side_info(plant.A, plant.B, rel_err=rel_err)
@@ -87,7 +89,7 @@ def one_trial(seed, alpha, N, lam_grid, rel_err=0.15, n_val=40,
     for name, solver in ARMS:
         res = solver(Phi=Phi, U=U, Xp=Xp, Gw=Gw_template, X_region=X_region,
                      GA_blocks=GA, GB_blocks=GB, A_side=A_side, B_side=B_side,
-                     mu_floor=mu_floor)
+                     mu_floor=mu_floor, reg=REG)
         row = {"seed": seed, "alpha": alpha, "N": N, "method": name,
                "id_feasible": res.feasible, "sX": res.sX,
                "id_time": res.solve_time, "n_var": res.n_variables}
@@ -114,9 +116,9 @@ def one_trial(seed, alpha, N, lam_grid, rel_err=0.15, n_val=40,
             row["muw_mass"] = float(np.sum(res.muw))
 
             model = to_uncertain_model(res)
-            row["lambda_min"] = min_feasible_lambda(model, safe, Mx)
+            row["lambda_min"] = min_feasible_lambda(model, safe, Mx, u_max=U_MAX_LIN)
             for lam in lam_grid:
-                ctrl = lambda_contractive_lp(model, safe, lam=lam, Mx=Mx)
+                ctrl = lambda_contractive_lp(model, safe, lam=lam, Mx=Mx, u_max=U_MAX_LIN)
                 lrow = {"seed": seed, "alpha": alpha, "N": N, "method": name,
                         "lam": lam, "lp_feasible": ctrl.feasible,
                         "rho": ctrl.rho, "lp_time": ctrl.solve_time}

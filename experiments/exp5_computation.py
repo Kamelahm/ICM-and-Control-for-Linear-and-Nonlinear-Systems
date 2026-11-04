@@ -34,6 +34,8 @@ from icm_control.identification import solve_dcm, solve_icm
 from icm_control.reporting import (COL_H, COL_W, label, save_fig, save_table,
                                    style, use_paper_style)
 from icm_control.sets import identity_blocks, row_blocks, structured_prior
+from icm_control.protocol import REG, U_MAX_LIN, X_RADIUS_LIN
+from icm_control.systems import collect_independent, box_region
 from icm_control.systems import (LinearSystem, collect_data,
                                  operating_region_from_data)
 
@@ -53,10 +55,9 @@ def timed_case(n, m, N, gen_mode, seed, alpha=2.0, template=0.01,
     plant = random_plant(n, m, rng)
     Gw_true = alpha * template * np.eye(n)
     Gw_template = template * np.eye(n)
-    Phi, U, Xp, Xs = collect_data(plant, N, 0.1 * np.ones(n), rng,
-                                  u_range=0.5, w_gen=Gw_true,
-                                  reset_radius=10.0)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, N, rng, x_radius=X_RADIUS_LIN,
+                                         u_range=0.5, w_gen=Gw_true)
+    X_region = box_region(n, X_RADIUS_LIN)
 
     if gen_mode == "row":
         GA = row_blocks(n, n, rel_err)
@@ -78,7 +79,8 @@ def timed_case(n, m, N, gen_mode, seed, alpha=2.0, template=0.01,
 
     for name, fn in (("DCM", solve_dcm), ("ICM", solve_icm)):
         res = fn(Phi=Phi, U=U, Xp=Xp, Gw=Gw_template, X_region=X_region,
-                 GA_blocks=GA, GB_blocks=GB, A_side=A_side, B_side=B_side)
+                 GA_blocks=GA, GB_blocks=GB, A_side=A_side, B_side=B_side,
+                 reg=REG)
         rows.append({"method": name, "time": res.solve_time,
                      "n_var": res.n_variables, "n_con": res.n_constraints,
                      "feasible": res.feasible})

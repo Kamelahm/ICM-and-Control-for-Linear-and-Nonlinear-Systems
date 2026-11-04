@@ -43,6 +43,8 @@ from icm_control.identification import solve_icm, solve_icm_no_side_info
 from icm_control.reporting import (COL_H, COL_W, save_fig, save_table,
                                    use_paper_style, wilson_ci)
 from icm_control.sets import structured_prior
+from icm_control.protocol import REG, U_MAX_LIN, X_RADIUS_LIN
+from icm_control.systems import collect_independent, box_region
 from icm_control.systems import (collect_data, linear_side_info,
                                  operating_region_from_data, safe_set_box,
                                  third_order_system)
@@ -92,9 +94,9 @@ def trial_bias(seed, bias, args):
     Gw_true = args.alpha * args.template * np.eye(n)
     Gw_tmpl = args.gamma * args.template * np.eye(n)
 
-    Phi, U, Xp, Xs = collect_data(plant, args.N, 0.5 * np.ones(n), rng,
-                                  w_gen=Gw_true)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, args.N, rng, x_radius=X_RADIUS_LIN,
+                                         w_gen=Gw_true)
+    X_region = box_region(n, X_RADIUS_LIN)
     safe = safe_set_box(n, 1.0)
     Mx = safe.max_norm_bound(p=np.inf)
     A_side, GA, B_side, GB = linear_side_info(plant.A, plant.B,
@@ -109,7 +111,7 @@ def trial_bias(seed, bias, args):
     for name, solver, kw in (("ICM", solve_icm, dict(A_side=A_side, B_side=B_side)),
                              ("ICM-noSI", solve_icm_no_side_info, {})):
         res = solver(Phi=Phi, U=U, Xp=Xp, Gw=Gw_tmpl, X_region=X_region,
-                     GA_blocks=GA, GB_blocks=GB, mu_floor=args.mu_floor, **kw)
+                     GA_blocks=GA, GB_blocks=GB, mu_floor=args.mu_floor, reg=REG, **kw)
         row = {"seed": seed, "bias": bias, "method": name,
                "prior_contains_truth": bias <= args.rel_err,
                "id_feasible": bool(res.feasible)}
@@ -120,7 +122,7 @@ def trial_bias(seed, bias, args):
                 "contains_true": contains_true_system(res, plant.A, plant.B),
                 "center_err": float(np.max(np.abs(res.CA - plant.A))),
                 "lambda_min": min_feasible_lambda(to_uncertain_model(res),
-                                                  safe, Mx),
+                                                  safe, Mx, u_max=U_MAX_LIN),
             })
         rows.append(row)
     return rows
@@ -136,9 +138,9 @@ def trial_excitation(seed, N, prior_kind, args):
     Gw_true = args.alpha * args.template * np.eye(n)
     Gw_tmpl = args.gamma * args.template * np.eye(n)
 
-    Phi, U, Xp, Xs = collect_data(plant, N, 0.5 * np.ones(n), rng,
-                                  w_gen=Gw_true)
-    X_region = operating_region_from_data(Xs)
+    Phi, U, Xp, Xs = collect_independent(plant, N, rng, x_radius=X_RADIUS_LIN,
+                                         w_gen=Gw_true)
+    X_region = box_region(n, X_RADIUS_LIN)
     D_minus = np.vstack([Phi, U])                     # regressor stack, Eq. (15)
     rank = int(np.linalg.matrix_rank(D_minus, tol=1e-8))
 
@@ -153,13 +155,13 @@ def trial_excitation(seed, N, prior_kind, args):
         _, GA, _, GB = build_prior("dense", plant.A, plant.B, args.rel_err)
         res = solve_icm_no_side_info(Phi=Phi, U=U, Xp=Xp, Gw=Gw_tmpl,
                                      X_region=X_region, GA_blocks=GA,
-                                     GB_blocks=GB, mu_floor=args.mu_floor)
+                                     GB_blocks=GB, mu_floor=args.mu_floor, reg=REG)
     else:
         A_side, GA, B_side, GB = build_prior(prior_kind, plant.A, plant.B,
                                              args.rel_err)
         res = solve_icm(Phi=Phi, U=U, Xp=Xp, Gw=Gw_tmpl, X_region=X_region,
                         GA_blocks=GA, GB_blocks=GB, A_side=A_side,
-                        B_side=B_side, mu_floor=args.mu_floor)
+                        B_side=B_side, mu_floor=args.mu_floor, reg=REG)
 
     row = {"seed": seed, "N": N, "prior": prior_kind, "rank_Dm": rank,
            "excited": rank >= n + m, "n_free": n_free(GA, GB, plant.A, plant.B),
